@@ -1,0 +1,414 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Brawl Arena 2D</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  background:#171b2e;
+  color:white;
+  font-family:Arial,sans-serif;
+  text-align:center;
+  overflow:hidden;
+}
+h1 { color:#ffcf32; padding:10px; }
+#game {
+  display:block;
+  margin:auto;
+  width:min(95vw,900px);
+  height:auto;
+  border:5px solid #343c59;
+  border-radius:12px;
+  background:#75c94b;
+  touch-action:none;
+}
+#info {
+  display:flex;
+  justify-content:center;
+  gap:25px;
+  padding:10px;
+  font-size:17px;
+}
+button {
+  padding:12px 25px;
+  margin:10px;
+  border:0;
+  border-radius:10px;
+  background:#ffbd24;
+  font-weight:bold;
+  cursor:pointer;
+}
+</style>
+</head>
+<body>
+
+<h1>⭐ BRAWL ARENA 2D ⭐</h1>
+
+<div id="info">
+  <span id="life">❤️ Vida: 100</span>
+  <span id="score">🏆 Pontos: 0</span>
+  <span id="ammo">🔫 Munição: 3</span>
+</div>
+
+<canvas id="game" width="900" height="550"></canvas>
+<button onclick="restart()">RECOMEÇAR</button>
+<p>WASD = mover | Mouse = mirar e atirar</p>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+const W = canvas.width;
+const H = canvas.height;
+
+let keys = {};
+let mouse = {x:450,y:275};
+let shooting = false;
+let score = 0;
+let gameOver = false;
+let lastShot = 0;
+let spawnTimer = 0;
+
+const player = {
+  x:450, y:275,
+  radius:19,
+  speed:3.5,
+  hp:100,
+  ammo:3,
+  reload:0
+};
+
+let enemies = [];
+let bullets = [];
+let enemyBullets = [];
+
+const walls = [
+  {x:180,y:110,w:110,h:45},
+  {x:610,y:110,w:110,h:45},
+  {x:180,y:390,w:110,h:45},
+  {x:610,y:390,w:110,h:45},
+  {x:400,y:210,w:100,h:100}
+];
+
+function circleRect(x,y,r,rect) {
+  const cx = Math.max(rect.x,Math.min(x,rect.x+rect.w));
+  const cy = Math.max(rect.y,Math.min(y,rect.y+rect.h));
+  return Math.hypot(x-cx,y-cy)<r;
+}
+
+function blocked(x,y,r) {
+  return walls.some(w=>circleRect(x,y,r,w));
+}
+
+function move(obj,dx,dy) {
+  if(!blocked(obj.x+dx,obj.y,obj.radius))
+    obj.x+=dx;
+  if(!blocked(obj.x,obj.y+dy,obj.radius))
+    obj.y+=dy;
+
+  obj.x=Math.max(obj.radius,Math.min(W-obj.radius,obj.x));
+  obj.y=Math.max(obj.radius,Math.min(H-obj.radius,obj.y));
+}
+
+function spawnEnemy() {
+  const side=Math.floor(Math.random()*4);
+  let x=0,y=0;
+
+  if(side===0){x=Math.random()*W;y=15;}
+  if(side===1){x=Math.random()*W;y=H-15;}
+  if(side===2){x=15;y=Math.random()*H;}
+  if(side===3){x=W-15;y=Math.random()*H;}
+
+  if(!blocked(x,y,17))
+    enemies.push({
+      x,y,radius:17,hp:3,speed:1.15,
+      cooldown:Math.random()*100
+    });
+}
+
+function shoot() {
+  if(player.ammo<=0 || Date.now()-lastShot<350) return;
+
+  const dx=mouse.x-player.x;
+  const dy=mouse.y-player.y;
+  const angle=Math.atan2(dy,dx);
+
+  bullets.push({
+    x:player.x+Math.cos(angle)*23,
+    y:player.y+Math.sin(angle)*23,
+    vx:Math.cos(angle)*8,
+    vy:Math.sin(angle)*8,
+    radius:6
+  });
+
+  player.ammo--;
+  lastShot=Date.now();
+}
+
+function update() {
+  if(gameOver) return;
+
+  let dx=0,dy=0;
+
+  if(keys["w"]||keys["ArrowUp"])dy--;
+  if(keys["s"]||keys["ArrowDown"])dy++;
+  if(keys["a"]||keys["ArrowLeft"])dx--;
+  if(keys["d"]||keys["ArrowRight"])dx++;
+
+  if(dx||dy) {
+    const len=Math.hypot(dx,dy);
+    move(player,dx/len*player.speed,dy/len*player.speed);
+  }
+
+  if(shooting) shoot();
+
+  if(player.ammo<3) {
+    player.reload++;
+    if(player.reload>=65) {
+      player.ammo++;
+      player.reload=0;
+    }
+  }
+
+  spawnTimer++;
+  if(spawnTimer>100) {
+    spawnEnemy();
+    spawnTimer=0;
+  }
+
+  bullets.forEach(b=>{
+    b.x+=b.vx;
+    b.y+=b.vy;
+
+    if(walls.some(w=>circleRect(b.x,b.y,b.radius,w)))
+      b.dead=true;
+
+    enemies.forEach(e=>{
+      if(Math.hypot(b.x-e.x,b.y-e.y)<b.radius+e.radius) {
+        e.hp--;
+        b.dead=true;
+        if(e.hp<=0) {
+          e.dead=true;
+          score+=10;
+        }
+      }
+    });
+  });
+
+  bullets=bullets.filter(b=>
+    !b.dead && b.x>0 && b.x<W && b.y>0 && b.y<H
+  );
+
+  enemies.forEach(e=>{
+    const angle=Math.atan2(player.y-e.y,player.x-e.x);
+    const dist=Math.hypot(player.x-e.x,player.y-e.y);
+
+    if(dist>35) {
+      move(e,Math.cos(angle)*e.speed,Math.sin(angle)*e.speed);
+    }
+
+    if(dist<38) {
+      player.hp-=0.25;
+    }
+
+    e.cooldown++;
+
+    if(dist<300 && e.cooldown>110) {
+      enemyBullets.push({
+        x:e.x,y:e.y,
+        vx:Math.cos(angle)*3,
+        vy:Math.sin(angle)*3,
+        radius:5
+      });
+      e.cooldown=0;
+    }
+  });
+
+  enemies=enemies.filter(e=>!e.dead);
+
+  enemyBullets.forEach(b=>{
+    b.x+=b.vx;
+    b.y+=b.vy;
+
+    if(walls.some(w=>circleRect(b.x,b.y,b.radius,w)))
+      b.dead=true;
+
+    if(Math.hypot(b.x-player.x,b.y-player.y)<
+      b.radius+player.radius) {
+      player.hp-=8;
+      b.dead=true;
+    }
+  });
+
+  enemyBullets=enemyBullets.filter(b=>
+    !b.dead && b.x>0 && b.x<W && b.y>0 && b.y<H
+  );
+
+  if(player.hp<=0) {
+    player.hp=0;
+    gameOver=true;
+  }
+
+  document.getElementById("life").textContent=
+    "❤️ Vida: "+Math.ceil(player.hp);
+  document.getElementById("score").textContent=
+    "🏆 Pontos: "+score;
+  document.getElementById("ammo").textContent=
+    "🔫 Munição: "+player.ammo;
+}
+
+function draw() {
+  ctx.clearRect(0,0,W,H);
+
+  // Grama
+  ctx.fillStyle="#75c94b";
+  ctx.fillRect(0,0,W,H);
+
+  // Detalhes do chão
+  ctx.fillStyle="#69b942";
+  for(let x=0;x<W;x+=50) {
+    for(let y=0;y<H;y+=50) {
+      ctx.fillRect(x+5,y+5,3,3);
+    }
+  }
+
+  // Obstáculos
+  walls.forEach(w=>{
+    ctx.fillStyle="#9c6035";
+    ctx.fillRect(w.x,w.y,w.w,w.h);
+    ctx.strokeStyle="#663b26";
+    ctx.lineWidth=5;
+    ctx.strokeRect(w.x,w.y,w.w,w.h);
+  });
+
+  // Balas do jogador
+  bullets.forEach(b=>{
+    ctx.fillStyle="#ffe342";
+    ctx.beginPath();
+    ctx.arc(b.x,b.y,b.radius,0,Math.PI*2);
+    ctx.fill();
+  });
+
+  // Balas inimigas
+  enemyBullets.forEach(b=>{
+    ctx.fillStyle="#ff5b48";
+    ctx.beginPath();
+    ctx.arc(b.x,b.y,b.radius,0,Math.PI*2);
+    ctx.fill();
+  });
+
+  // Inimigos
+  enemies.forEach(e=>{
+    ctx.fillStyle="#e94b4b";
+    ctx.beginPath();
+    ctx.arc(e.x,e.y,e.radius,0,Math.PI*2);
+    ctx.fill();
+
+    ctx.fillStyle="white";
+    ctx.fillRect(e.x-10,e.y-25,20,4);
+    ctx.fillStyle="#ff3030";
+    ctx.fillRect(e.x-10,e.y-25,20*(e.hp/3),4);
+
+    ctx.fillStyle="white";
+    ctx.beginPath();
+    ctx.arc(e.x-5,e.y-4,3,0,Math.PI*2);
+    ctx.arc(e.x+5,e.y-4,3,0,Math.PI*2);
+    ctx.fill();
+  });
+
+  // Jogador
+  ctx.fillStyle="#3278ed";
+  ctx.beginPath();
+  ctx.arc(player.x,player.y,player.radius,0,Math.PI*2);
+  ctx.fill();
+
+  ctx.strokeStyle="#1749a5";
+  ctx.lineWidth=4;
+  ctx.stroke();
+
+  // Olhos
+  ctx.fillStyle="white";
+  ctx.beginPath();
+  ctx.arc(player.x-6,player.y-5,5,0,Math.PI*2);
+  ctx.arc(player.x+6,player.y-5,5,0,Math.PI*2);
+  ctx.fill();
+
+  ctx.fillStyle="#222";
+  ctx.beginPath();
+  ctx.arc(player.x-6,player.y-5,2,0,Math.PI*2);
+  ctx.arc(player.x+6,player.y-5,2,0,Math.PI*2);
+  ctx.fill();
+
+  if(gameOver) {
+    ctx.fillStyle="rgba(0,0,0,0.75)";
+    ctx.fillRect(0,0,W,H);
+
+    ctx.fillStyle="#ffcf32";
+    ctx.font="bold 55px Arial";
+    ctx.textAlign="center";
+    ctx.fillText("FIM DE JOGO!",W/2,H/2);
+
+    ctx.fillStyle="white";
+    ctx.font="25px Arial";
+    ctx.fillText("Pontuação: "+score,W/2,H/2+45);
+    ctx.textAlign="start";
+  }
+}
+
+function loop() {
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+function restart() {
+  player.x=450;
+  player.y=275;
+  player.hp=100;
+  player.ammo=3;
+  player.reload=0;
+  score=0;
+  enemies=[];
+  bullets=[];
+  enemyBullets=[];
+  spawnTimer=0;
+  gameOver=false;
+}
+
+document.addEventListener("keydown",e=>{
+  keys[e.key.toLowerCase()]=true;
+});
+
+document.addEventListener("keyup",e=>{
+  keys[e.key.toLowerCase()]=false;
+});
+
+function setMouse(e) {
+  const rect=canvas.getBoundingClientRect();
+  mouse.x=(e.clientX-rect.left)*W/rect.width;
+  mouse.y=(e.clientY-rect.top)*H/rect.height;
+}
+
+canvas.addEventListener("pointermove",setMouse);
+
+canvas.addEventListener("pointerdown",e=>{
+  setMouse(e);
+  shooting=true;
+  canvas.setPointerCapture(e.pointerId);
+});
+
+canvas.addEventListener("pointerup",()=>{
+  shooting=false;
+});
+
+canvas.addEventListener("pointercancel",()=>{
+  shooting=false;
+});
+
+loop();
+</script>
+</body>
+</html>
